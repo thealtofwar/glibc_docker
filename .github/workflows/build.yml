@@ -1,0 +1,34 @@
+name: Docker CI
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+concurrency:
+  group: "pytorch"
+  cancel-in-progress: false
+
+jobs:
+  create-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - id: build-matrix
+        run: ./main.sh
+    outputs:
+      version_matrix: ${{ steps.build-matrix.outputs.version_matrix }}
+  run:
+    needs: create-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        version: ${{ fromJson(needs.create-matrix.outputs.version_matrix) }}
+      fail-fast: false
+    
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build docker container
+        run: docker build --build-arg GLIBC_VERSION=${{ matrix.version }} 
