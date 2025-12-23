@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: build-matrix
-        run: ./main.sh
+        run: chmod +x main.sh && ./main.sh
     outputs:
       version_matrix: ${{ steps.build-matrix.outputs.version_matrix }}
   run:
