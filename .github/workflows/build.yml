@@ -31,4 +31,4 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Build docker container
-        run: docker build --build-arg GLIBC_VERSION=${{ matrix.version }} 
+        run: docker build --build-arg GLIBC_VERSION=${{ matrix.version }} .
