@@ -2,7 +2,7 @@ ARG GLIBC_VERSION="2.42"
 ARG GCC_VERSION="13.2.0"
 ARG TARGET_ROOT="/opt/target-root"
 
-FROM debian:stable-slim AS build
+FROM ubuntu:14.04 AS build
 
 ARG TARGET_ROOT
 ARG GCC_VERSION
@@ -22,11 +22,32 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && mkdir -p ${TARGET_ROOT} 
 
+RUN wget https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz -Ogcc-bootstrap.tar.gz \
+    && tar -zxf gcc-bootstrap.tar.gz \
+    && mv gcc-${GCC_VERSION} gcc-bootstrap \
+    && cd gcc-bootstrap \
+    && ./contrib/download_prerequisites \
+    && mkdir build \
+    && cd build \
+    && ../configure \
+        --with-glibc-version=${GLIBC_VERSION} \
+        --prefix=/usr \
+        --disable-multilib \
+        --disable-libsanitizer \
+        --enable-languages=c,c++ \
+        --disable-bootstrap \
+    && make -j$(nproc) \
+    && mkdir /gcc-bootstrap-toolchain \
+    && make install DESTDIR=/gcc-bootstrap-toolchain \
+    && cd ../.. \
+    && rm -rf gcc-bootstrap \
+    && mv gcc-bootstrap.tar.gz gcc-${GCC_VERSION}.tar.gz
+
 RUN wget https://ftp.gnu.org/gnu/glibc/glibc-${GLIBC_VERSION}.tar.gz \
     && tar -zxf glibc-${GLIBC_VERSION}.tar.gz \
     && mkdir glibc-build \
     && cd glibc-build \
-    && ../glibc-${GLIBC_VERSION}/configure --prefix=/usr --disable-werror \
+    && CC="/gcc-bootstrap-toolchain/usr/bin/gcc" CXX="/gcc-bootstrap-toolchain/usr/bin/g++" ../glibc-${GLIBC_VERSION}/configure --prefix=/usr --host=x86_64-linux-gnu --disable-werror \
     && make -j$(nproc) \
     && make install DESTDIR=${TARGET_ROOT} \
     && cd .. \
@@ -43,13 +64,15 @@ RUN cp -rL /usr/include/linux ${TARGET_ROOT}/usr/include \
     && cp -rL /usr/include/asm-generic ${TARGET_ROOT}/usr/include \
     && cp -rL /usr/include/x86_64-linux-gnu/asm ${TARGET_ROOT}/usr/include
 
-RUN wget https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz \
-    && tar -zxf gcc-${GCC_VERSION}.tar.gz \
+    # downloaded in previous step
+RUN tar -zxf gcc-${GCC_VERSION}.tar.gz \
     && cd gcc-${GCC_VERSION} \
     && ./contrib/download_prerequisites \
     && mkdir build \
     && cd build \
     && ../configure \
+        --target=x86_64-linux-gnu \
+        --with-glibc-version=${GLIBC_VERSION} \
         --prefix=/usr \
         --disable-multilib \
         --disable-libsanitizer \
@@ -63,12 +86,16 @@ RUN wget https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.g
     && cd ../.. \
     && rm -rf gcc-${GCC_VERSION} gcc-${GCC_VERSION}.tar.gz
 
+RUN ln -s x86_64-linux-gnu-gcc ${TARGET_ROOT}/usr/bin/gcc
+RUN ln -s x86_64-linux-gnu-g++ ${TARGET_ROOT}/usr/bin/g++
+
 # install bash
 RUN wget https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz \
     && tar -zxf bash-5.2.tar.gz \
     && cd bash-5.2 \
     && export LD_LIBRARY_PATH=${TARGET_ROOT}/usr/lib \
     && ./configure \
+        --host=x86_64-linux-gnu \
         --prefix=/usr \
         --without-bash-malloc \
         CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
@@ -85,10 +112,11 @@ RUN wget https://ftp.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz \
     && export LD_LIBRARY_PATH=${TARGET_ROOT}/usr/lib \
     && FORCE_UNSAFE_CONFIGURE=1 ./configure \
         --prefix=/usr \
-        CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
+        --host=x86_64-linux-gnu \
+        CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}"
+
     # we ignore the resulting error because make might fail during manpage generation, but it isn't important
-    && make -j$(nproc) \ 
-    || exit 0
+RUN cd coreutils-9.5 && make -j$(nproc)
 
 RUN cd coreutils-9.5 && make install-exec DESTDIR=${TARGET_ROOT} \
     && cd .. \
@@ -100,6 +128,7 @@ RUN wget https://ftp.gnu.org/gnu/sed/sed-4.9.tar.gz \
     && export LD_LIBRARY_PATH=${TARGET_ROOT}/usr/lib \
     && ./configure \
         --prefix=/usr \
+        --host=x86_64-linux-gnu \
         CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
     && make -j$(nproc) \
     && make install DESTDIR=${TARGET_ROOT} \
@@ -112,21 +141,25 @@ RUN wget https://ftp.gnu.org/gnu/make/make-4.4.tar.gz \
     && export LD_LIBRARY_PATH=${TARGET_ROOT}/usr/lib \
     && ./configure \
         --prefix=/usr \
+        --host=x86_64-linux-gnu \
         CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
     && make -j$(nproc) \
     && make install DESTDIR=${TARGET_ROOT} \
     && cd .. \
     && rm -rf make-4.4 make-4.4.tar.gz
 
-RUN wget https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.gz \
-    && tar -zxf binutils-2.42.tar.gz \
-    && cd binutils-2.42 \
+RUN wget https://ftp.gnu.org/gnu/binutils/binutils-2.45.tar.gz \
+    && tar -zxf binutils-2.45.tar.gz \
+    && cd binutils-2.45 \
     && export LD_LIBRARY_PATH=${TARGET_ROOT}/usr/lib \
     && ./configure \
         --prefix=/usr \
         # gprofng doesn't play nice with the compilation options
         --disable-gprofng \
-        CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
+        --target=x86_64-linux-gnu \
+        --host=x86_64-linux-gnu \
+        CC_FOR_TARGET="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
+        LD_FOR_TARGET="${TARGET_ROOT}/usr/bin/ld --sysroot=${TARGET_ROOT}"  \
     && make -j$(nproc) \
     && make install DESTDIR=${TARGET_ROOT} \
     && cd .. \
@@ -138,6 +171,7 @@ RUN wget https://ftp.gnu.org/gnu/grep/grep-3.11.tar.gz \
     && export LD_LIBRARY_PATH=${TARGET_ROOT}/usr/lib \
     && ./configure \
         --prefix=/usr \
+        --host=x86_64-linux-gnu \
         CC="${TARGET_ROOT}/usr/bin/gcc --sysroot=${TARGET_ROOT}" \
     && make -j$(nproc) \
     && make install DESTDIR=${TARGET_ROOT} \
@@ -170,6 +204,8 @@ RUN ln -s usr/sbin ${TARGET_ROOT}/sbin
 RUN ln -s bash ${TARGET_ROOT}/usr/bin/sh
 
 RUN ln -s /usr/bin/gcc ${TARGET_ROOT}/usr/bin/cc
+RUN ln -s /usr/bin/g++ ${TARGET_ROOT}/usr/bin/c++
+
 RUN echo $(getent passwd root) > ${TARGET_ROOT}/etc/passwd && echo $(getent group 0) > ${TARGET_ROOT}/etc/group
 
 RUN mkdir  ${TARGET_ROOT}/tmp
