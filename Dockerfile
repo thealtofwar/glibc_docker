@@ -2,7 +2,7 @@ ARG GLIBC_VERSION="2.42"
 ARG GCC_VERSION="13.2.0"
 ARG TARGET_ROOT="/opt/target-root"
 
-FROM ubuntu:14.04 AS build
+FROM debian:bullseye-slim AS build
 
 ARG TARGET_ROOT
 ARG GCC_VERSION

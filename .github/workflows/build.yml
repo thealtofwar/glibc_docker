@@ -23,6 +23,9 @@ jobs:
   run:
     needs: create-matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         version: ${{ fromJson(needs.create-matrix.outputs.version_matrix) }}
@@ -30,5 +33,17 @@ jobs:
     
     steps:
       - uses: actions/checkout@v6
-      - name: Build docker container
-        run: docker build --build-arg GLIBC_VERSION=${{ matrix.version }} .
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push docker container
+        run: |
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/glibc:${{ matrix.version }}
+          docker build --build-arg GLIBC_VERSION=${{ matrix.version }} -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+    
